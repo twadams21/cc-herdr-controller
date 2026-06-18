@@ -16,6 +16,13 @@
     "dpad_right": "pane_right"
   },
 
+  "remote": {
+    "_comment": "Rust V2 only: where the herdr relay runs. ssh_host is any valid ssh target (user@host or a ~/.ssh/config alias). relay_cmd is run on the Mac and reads intents on stdin. Leave ssh_host empty to require --host. The Python daemon ignores this block.",
+    "ssh_host": "",
+    "ssh_args": [],
+    "relay_cmd": "cd ~/cc-herdr-controller && python3 relay.py"
+  },
+
   "profile": {
     "_comment": "friendly name -> raw SDL index. Defaults are for the Switch Pro via SDL; if buttons feel wrong, run: python controller_daemon.py --calibrate",
     "buttons": {

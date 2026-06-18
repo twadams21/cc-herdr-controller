@@ -8,3 +8,8 @@ env/
 # Runtime artifacts
 .daemon.pid
 .daemon.log
+
+# Rust (V2)
+rust/target/
+# vendored SDL2 MinGW dev libs (re-download with rust/setup-sdl2.ps1)
+rust/vendor/

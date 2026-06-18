@@ -1,0 +1,21 @@
+[package]
+name = "cc-herdr-controller"
+version = "2.0.0"
+edition = "2021"
+description = "Drive herdr from a game controller (Rust V2)"
+license = "MIT"
+
+[[bin]]
+name = "cc-herdr-controller"
+path = "src/main.rs"
+
+[dependencies]
+sdl2 = "0.37"
+serde_json = "1"
+base64 = "0.22"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

@@ -13,8 +13,12 @@ permissions beyond reading the controller.
 ## Status — V1
 
 A Python/SDL prototype, and genuinely a joy to use. Also rough in places: a
-little buggy, voice mode is experimental, and the CLI needs work. A **Rust V2**
-(single binary, lower latency, no runtime deps) is planned.
+little buggy, voice mode is experimental, and the CLI needs work.
+
+A **Rust V2** now lives in [`rust/`](rust/) — lower latency, and it adds a
+**remote** mode so the controller can live on one machine (e.g. a Windows PC)
+while herdr runs on another (e.g. a Mac) reached over SSH. It shares
+`mapping.json` with V1. See **[Rust V2 + remote herdr](docs/rust-remote.md)**.
 
 ## Requirements
 
@@ -55,4 +59,5 @@ On macOS you'll likely need to grant **Input Monitoring** — see
 ## Docs
 
 - **[Usage & configuration](docs/guide.md)** — how it works, modes, calibration, bindings, scrolling, voice
+- **[Rust V2 + remote herdr](docs/rust-remote.md)** — controller on one machine, herdr on another (over SSH)
 - **[Troubleshooting & caveats](docs/troubleshooting.md)** — macOS Input Monitoring, controller conflicts, known limitations
