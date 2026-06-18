@@ -39,15 +39,20 @@ pub fn load(path: &Path) -> Result<Value, String> {
 }
 
 pub fn save(path: &Path, cfg: &Value) -> Result<(), String> {
-    let mut text = serde_json::to_string_pretty(cfg)
-        .map_err(|e| format!("cannot serialize config: {e}"))?;
+    let mut text =
+        serde_json::to_string_pretty(cfg).map_err(|e| format!("cannot serialize config: {e}"))?;
     text.push('\n');
     std::fs::write(path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))
 }
 
 /// `(button_index -> name, axis_name -> index)` from the `profile` block,
 /// skipping any `_comment` keys.
-pub fn name_maps(cfg: &Value) -> (std::collections::HashMap<u32, String>, std::collections::HashMap<String, u32>) {
+pub fn name_maps(
+    cfg: &Value,
+) -> (
+    std::collections::HashMap<u32, String>,
+    std::collections::HashMap<String, u32>,
+) {
     let mut btn_name = std::collections::HashMap::new();
     let mut axis_index = std::collections::HashMap::new();
     let profile = &cfg["profile"];

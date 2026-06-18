@@ -23,6 +23,12 @@ herdr's local socket, so latency is roughly one network hop per action.
 The Rust daemon and the Python daemon share the same `mapping.json`, so a
 profile calibrated by either works in the other.
 
+V2 can also run **entirely on one machine** with `--local` — the controller and
+herdr on the same Mac, no SSH. It launches `relay.py` as a local subprocess
+instead of over SSH; everything else (intents, dispatch) is identical. See
+[Local mode](#local-mode-controller--herdr-on-one-machine) below. This is the
+same single-machine shape as V1, but in Rust.
+
 ## Wire protocol (intents)
 
 The Windows binary writes newline-delimited intents to the relay's stdin:
@@ -116,6 +122,47 @@ press Enter to skip a control, or type `q`+Enter to stop early.
 
 Test the mapping with `--dry-run` (no Mac needed), then go live with no args
 once `remote.ssh_host` is set.
+
+## Local mode (controller + herdr on one machine)
+
+When the controller and herdr live on the **same** machine (e.g. a Switch Pro
+paired to the Mac over Bluetooth, driving herdr on that Mac), pass `--local`.
+There's no SSH: the daemon runs `relay.py` as a child process, piping intents to
+its stdin, and the relay drives herdr over its local socket. The relay inherits
+the daemon's environment, so launch the daemon from a shell that can reach herdr
+(e.g. inside a herdr session, or anywhere `herdr` is on `PATH`).
+
+**Build** (macOS/Linux — needs the system SDL2):
+
+```bash
+brew install sdl2                       # macOS; Linux: apt install libsdl2-dev
+cargo build --release --manifest-path rust/Cargo.toml
+# -> rust/target/release/cc-herdr-controller
+```
+
+The `sdl2` crate is resolved via `pkg-config` on these platforms (the Windows
+MinGW vendoring in `build.rs` is skipped). No `SDL2.dll` to ship.
+
+**Configure** — the `local` block in `mapping.json` (defaults are fine if you run
+from the repo root, where `relay.py`/`herdr.py` live):
+
+```json
+"local": {
+  "relay_cmd": "python3 relay.py"
+}
+```
+
+`relay_cmd` runs via the shell from the directory holding `mapping.json`.
+
+**Run** (from the repo root):
+
+```bash
+bin=rust/target/release/cc-herdr-controller
+"$bin" --list             # detected controllers
+"$bin" --dry-run          # full mapping, prints intents (no herdr)
+"$bin" --monitor          # input -> action, does nothing; add --perform to act
+"$bin" --local            # drive herdr on this machine for real
+```
 
 ## Notes & caveats
 

@@ -1,7 +1,10 @@
-//! Where intents go. Either a persistent SSH child to the Mac relay, or stdout
-//! (for --dry-run / --monitor, which never contact the Mac).
+//! Where intents go. A long-lived child process consumes newline-delimited
+//! intents on its stdin and runs `relay.py` next to herdr — either over SSH to
+//! another machine (remote herdr) or as a local subprocess (herdr on *this*
+//! machine). `StdoutTransport` is the no-op used by --dry-run / --monitor.
 
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
 
 pub trait Transport {
@@ -17,42 +20,41 @@ impl Transport for StdoutTransport {
     }
 }
 
-pub struct SshConfig {
-    pub host: String,
-    pub extra_args: Vec<String>,
-    pub relay_cmd: String,
-}
-
-/// One long-lived `ssh <host> <relay_cmd>` child. Intents are written, newline
-/// terminated, to its stdin; the relay runs herdr locally on the Mac. The
-/// connection stays open so each intent is a single network hop, and we
-/// transparently respawn the child if the pipe breaks.
-pub struct SshTransport {
-    cfg: SshConfig,
+/// A long-lived child process fed newline-delimited intents on its stdin. The
+/// command is rebuilt by `spawn` on each (re)connect, so a broken pipe is
+/// respawned transparently. Backs both the SSH (remote herdr) and local
+/// (herdr on this machine) transports — they differ only in how the child is
+/// launched.
+pub struct ChildTransport {
+    label: String,
+    spawn: Box<dyn Fn() -> Command>,
     child: Option<Child>,
     stdin: Option<ChildStdin>,
 }
 
-impl SshTransport {
-    pub fn new(cfg: SshConfig) -> Result<Self, String> {
-        let mut t = SshTransport { cfg, child: None, stdin: None };
+impl ChildTransport {
+    fn new(label: String, spawn: impl Fn() -> Command + 'static) -> Result<Self, String> {
+        let mut t = ChildTransport {
+            label,
+            spawn: Box::new(spawn),
+            child: None,
+            stdin: None,
+        };
         t.connect()?;
         Ok(t)
     }
 
     fn connect(&mut self) -> Result<(), String> {
-        let mut child = Command::new("ssh")
-            .args(&self.cfg.extra_args)
-            .arg(&self.cfg.host)
-            .arg(&self.cfg.relay_cmd)
-            .stdin(Stdio::piped())
+        let mut cmd = (self.spawn)();
+        cmd.stdin(Stdio::piped())
             .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::inherit());
+        let mut child = cmd
             .spawn()
-            .map_err(|e| format!("failed to spawn ssh: {e}"))?;
+            .map_err(|e| format!("failed to start relay ({}): {e}", self.label))?;
         self.stdin = child.stdin.take();
         self.child = Some(child);
-        eprintln!("[transport] connected: ssh {} {}", self.cfg.host, self.cfg.relay_cmd);
+        eprintln!("[transport] connected: {}", self.label);
         Ok(())
     }
 
@@ -62,14 +64,14 @@ impl SshTransport {
             let _ = c.wait();
         }
         self.stdin = None;
-        eprintln!("[transport] reconnecting to {} ...", self.cfg.host);
+        eprintln!("[transport] reconnecting: {} ...", self.label);
         if let Err(e) = self.connect() {
             eprintln!("[transport] reconnect failed: {e}");
         }
     }
 }
 
-impl Transport for SshTransport {
+impl Transport for ChildTransport {
     fn send(&mut self, intent: &str) {
         for _ in 0..2 {
             if self.stdin.is_none() {
@@ -77,7 +79,11 @@ impl Transport for SshTransport {
             }
             if let Some(stdin) = self.stdin.as_mut() {
                 let line = format!("{intent}\n");
-                if stdin.write_all(line.as_bytes()).and_then(|_| stdin.flush()).is_ok() {
+                if stdin
+                    .write_all(line.as_bytes())
+                    .and_then(|_| stdin.flush())
+                    .is_ok()
+                {
                     return;
                 }
                 eprintln!("[transport] write failed; resetting connection");
@@ -86,4 +92,43 @@ impl Transport for SshTransport {
         }
         eprintln!("[transport] dropped intent (no connection): {intent}");
     }
+}
+
+/// `ssh <host> <relay_cmd>` — herdr on another machine. One persistent
+/// connection; the relay runs herdr against its *local* socket so only the
+/// compact intent crosses the network.
+pub fn ssh_transport(
+    host: String,
+    extra_args: Vec<String>,
+    relay_cmd: String,
+) -> Result<ChildTransport, String> {
+    let label = format!("ssh {host} {relay_cmd}");
+    ChildTransport::new(label, move || {
+        let mut c = Command::new("ssh");
+        c.args(&extra_args).arg(&host).arg(&relay_cmd);
+        c
+    })
+}
+
+/// Run the relay as a local subprocess — herdr on *this* machine, no SSH. The
+/// relay is launched through the shell from `dir` (the repo root, so it can
+/// find relay.py / herdr.py) and inherits our environment, including whatever
+/// the running herdr session exposes for its socket.
+pub fn local_transport(relay_cmd: String, dir: Option<PathBuf>) -> Result<ChildTransport, String> {
+    let label = format!("local: {relay_cmd}");
+    ChildTransport::new(label, move || {
+        let mut c = if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.arg("/C").arg(&relay_cmd);
+            c
+        } else {
+            let mut c = Command::new("sh");
+            c.arg("-c").arg(&relay_cmd);
+            c
+        };
+        if let Some(d) = &dir {
+            c.current_dir(d);
+        }
+        c
+    })
 }

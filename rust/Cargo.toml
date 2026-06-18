@@ -10,9 +10,17 @@ name = "cc-herdr-controller"
 path = "src/main.rs"
 
 [dependencies]
-sdl2 = "0.37"
 serde_json = "1"
 base64 = "0.22"
+
+# Windows links the vendored MinGW SDL2 (search path set in build.rs, linked by
+# name). Everywhere else, resolve the system SDL2 (e.g. `brew install sdl2`) via
+# pkg-config so the linker gets the right -L path.
+[target.'cfg(windows)'.dependencies]
+sdl2 = "0.37"
+
+[target.'cfg(not(windows))'.dependencies]
+sdl2 = { version = "0.37", features = ["use-pkgconfig"] }
 
 [profile.release]
 lto = true

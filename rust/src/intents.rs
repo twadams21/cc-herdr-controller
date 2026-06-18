@@ -45,5 +45,8 @@ pub fn keys_intent(name: &str) -> String {
 
 /// `text <base64>` — base64 so spaces/newlines survive the line protocol.
 pub fn text_intent(s: &str) -> String {
-    format!("text {}", base64::engine::general_purpose::STANDARD.encode(s.as_bytes()))
+    format!(
+        "text {}",
+        base64::engine::general_purpose::STANDARD.encode(s.as_bytes())
+    )
 }

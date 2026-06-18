@@ -23,6 +23,11 @@
     "relay_cmd": "cd ~/cc-herdr-controller && python3 relay.py"
   },
 
+  "local": {
+    "_comment": "Rust V2 --local mode: run herdr on THIS machine, no SSH. relay_cmd is run via the shell from the repo root (next to herdr.py/relay.py) and reads intents on stdin. The Python daemon ignores this block.",
+    "relay_cmd": "python3 relay.py"
+  },
+
   "profile": {
     "_comment": "friendly name -> raw SDL index. Defaults are for the Switch Pro via SDL; if buttons feel wrong, run: python controller_daemon.py --calibrate",
     "buttons": {

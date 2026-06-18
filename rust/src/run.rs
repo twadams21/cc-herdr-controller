@@ -13,7 +13,16 @@ const SCROLL_BUTTON_NOTCH: i32 = 3;
 
 fn run_dictation(cmd: &Option<String>) {
     if let Some(c) = cmd {
-        let _ = std::process::Command::new("cmd").args(["/C", c]).spawn();
+        let mut command = if cfg!(windows) {
+            let mut x = std::process::Command::new("cmd");
+            x.args(["/C", c]);
+            x
+        } else {
+            let mut x = std::process::Command::new("sh");
+            x.args(["-c", c]);
+            x
+        };
+        let _ = command.spawn();
     }
 }
 
@@ -26,7 +35,10 @@ fn dispatch_action(
     dictation_cmd: &Option<String>,
     transport: &mut dyn Transport,
 ) {
-    println!("{src} -> {action}  [{}]", if perform { "performed" } else { "skipped" });
+    println!(
+        "{src} -> {action}  [{}]",
+        if perform { "performed" } else { "skipped" }
+    );
     if !perform {
         return;
     }
@@ -36,11 +48,19 @@ fn dispatch_action(
     }
     match action {
         "scroll_up" => {
-            let d = if scroll_invert { -SCROLL_BUTTON_NOTCH } else { SCROLL_BUTTON_NOTCH };
+            let d = if scroll_invert {
+                -SCROLL_BUTTON_NOTCH
+            } else {
+                SCROLL_BUTTON_NOTCH
+            };
             transport.send(&intents::scroll_intent(d));
         }
         "scroll_down" => {
-            let d = if scroll_invert { SCROLL_BUTTON_NOTCH } else { -SCROLL_BUTTON_NOTCH };
+            let d = if scroll_invert {
+                SCROLL_BUTTON_NOTCH
+            } else {
+                -SCROLL_BUTTON_NOTCH
+            };
             transport.send(&intents::scroll_intent(d));
         }
         "dictation" => run_dictation(dictation_cmd),
@@ -61,8 +81,7 @@ pub fn run_loop(
     let num_axes = joy.num_axes();
 
     let (btn_name, axis_index) = config::name_maps(cfg);
-    let btn_index: HashMap<String, u32> =
-        btn_name.iter().map(|(i, n)| (n.clone(), *i)).collect();
+    let btn_index: HashMap<String, u32> = btn_name.iter().map(|(i, n)| (n.clone(), *i)).collect();
 
     let bindings = &cfg["bindings"];
     let settings = &cfg["settings"];
@@ -77,15 +96,22 @@ pub fn run_loop(
     let scroll_tick = Duration::from_millis(sc["tick_ms"].as_u64().unwrap_or(30));
     let scroll_max = sc["max_lines"].as_i64().unwrap_or(6) as i32;
 
-    let arrows_on = settings.get("arrows").map(|v| v.is_object()).unwrap_or(false);
+    let arrows_on = settings
+        .get("arrows")
+        .map(|v| v.is_object())
+        .unwrap_or(false);
     let ar = &settings["arrows"];
     let arrows_ax = if arrows_on {
-        axis_index.get(ar["axis_x"].as_str().unwrap_or("left_x")).copied()
+        axis_index
+            .get(ar["axis_x"].as_str().unwrap_or("left_x"))
+            .copied()
     } else {
         None
     };
     let arrows_ay = if arrows_on {
-        axis_index.get(ar["axis_y"].as_str().unwrap_or("left_y")).copied()
+        axis_index
+            .get(ar["axis_y"].as_str().unwrap_or("left_y"))
+            .copied()
     } else {
         None
     };
@@ -149,10 +175,18 @@ pub fn run_loop(
                         v_down = now;
                         continue;
                     }
-                    let name = btn_name.get(&bi).cloned().unwrap_or_else(|| format!("button{bi}"));
+                    let name = btn_name
+                        .get(&bi)
+                        .cloned()
+                        .unwrap_or_else(|| format!("button{bi}"));
                     match bindings.get(name.as_str()).and_then(|a| a.as_str()) {
                         Some(action) if action != "voice" => dispatch_action(
-                            action, &name, perform, scroll_invert, &dictation_cmd, transport,
+                            action,
+                            &name,
+                            perform,
+                            scroll_invert,
+                            &dictation_cmd,
+                            transport,
                         ),
                         Some(_) => {}
                         None => println!("{name} (button {bi})  (unbound)"),
@@ -175,7 +209,12 @@ pub fn run_loop(
                         let name = format!("dpad_{d}");
                         if let Some(action) = bindings.get(name.as_str()).and_then(|a| a.as_str()) {
                             dispatch_action(
-                                action, &name, perform, scroll_invert, &dictation_cmd, transport,
+                                action,
+                                &name,
+                                perform,
+                                scroll_invert,
+                                &dictation_cmd,
+                                transport,
                             );
                         }
                     }
@@ -192,7 +231,14 @@ pub fn run_loop(
             let pressed = controller::norm(joy.axis(*aidx).unwrap_or(0)) > trigger_threshold;
             if pressed && !trigger_down[name] {
                 if let Some(action) = bindings.get(name.as_str()).and_then(|a| a.as_str()) {
-                    dispatch_action(action, name, perform, scroll_invert, &dictation_cmd, transport);
+                    dispatch_action(
+                        action,
+                        name,
+                        perform,
+                        scroll_invert,
+                        &dictation_cmd,
+                        transport,
+                    );
                 }
             }
             trigger_down.insert(name.clone(), pressed);
@@ -213,7 +259,11 @@ pub fn run_loop(
                     if perform {
                         transport.send(&intents::scroll_intent(delta));
                     } else {
-                        println!("scroll {} {}  [skipped]", if delta > 0 { "up" } else { "down" }, delta.abs());
+                        println!(
+                            "scroll {} {}  [skipped]",
+                            if delta > 0 { "up" } else { "down" },
+                            delta.abs()
+                        );
                     }
                 }
             }
@@ -228,7 +278,11 @@ pub fn run_loop(
                     arrows_last_dir = None;
                 } else {
                     let direction = if vx.abs() >= vy.abs() {
-                        if vx > 0.0 { "right" } else { "left" }
+                        if vx > 0.0 {
+                            "right"
+                        } else {
+                            "left"
+                        }
                     } else if vy > 0.0 {
                         "down" // SDL y+ = down
                     } else {
