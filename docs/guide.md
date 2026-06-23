@@ -154,10 +154,16 @@ cc-controller config show                       # styled view of bindings + sett
 cc-controller config get bindings.ZR            # read a value (dotted path)
 cc-controller config set backend tmux           # write a value (coerces bool/number/string)
 cc-controller config set settings.scroll.invert true
-cc-controller config bind                        # interactive: control -> action
-cc-controller config edit                        # interactive: backend, scroll, voice
+cc-controller config bind                        # quick: pick a control, pick an action
+cc-controller config edit                        # full-screen grid editor (below)
 cc-controller config path                        # where is mapping.json?
 ```
+
+`config edit` is an arrow-key grid for every button at once: **↑/↓** moves
+between buttons (and the cyclable settings — backend, scroll invert, voice
+mode), **←/→** changes the highlighted one's action/value (including `—` to
+unbind), **Enter** saves, **Esc** cancels. `config bind` is the quicker
+two-prompt path for a single control.
 
 `config set` / `bind` / `edit` rewrite the file with key order and the `_comment`
 documentation keys preserved (they do normalise whitespace to canonical JSON).

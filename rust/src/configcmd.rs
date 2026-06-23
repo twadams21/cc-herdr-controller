@@ -1,12 +1,15 @@
 //! `cc-controller config …` — read and edit mapping.json from the CLI.
 //!
-//! `show` / `get` / `set` / `path` are non-interactive; `bind` / `edit` use
-//! cliclack prompts (and require a TTY). All writes go through `config::save`,
-//! which now preserves key order and the `_comment` keys (preserve_order).
+//! `show` / `get` / `set` / `path` are non-interactive. `bind` is a quick
+//! two-prompt binder (cliclack). `edit` is a full-screen arrow-key grid: ↑/↓
+//! moves between buttons (and the cyclable settings), ←/→ changes each one's
+//! value, Enter saves, Esc cancels. Interactive commands require a TTY. All
+//! writes go through `config::save`, which preserves key order and the
+//! `_comment` keys (preserve_order).
 
 use crate::cli::ConfigAction;
 use crate::config;
-use console::style;
+use console::{style, Key, Term};
 use serde_json::Value;
 use std::path::Path;
 
@@ -207,55 +210,192 @@ fn bind(cfg_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+// ---- interactive grid editor (`config edit`) -------------------------------
+
+const UNBOUND: &str = "—";
+
+/// One editable row: a button binding or a settings choice, with a cyclable
+/// set of options. For binding rows, option 0 (`—`) means "unbound".
+struct Row {
+    label: String,
+    path: String,
+    options: Vec<String>,
+    idx: usize,
+    binding: bool,
+}
+
+fn choice_row(label: &str, path: &str, opts: &[&str], current: &str) -> Row {
+    let options: Vec<String> = opts.iter().map(|s| s.to_string()).collect();
+    let idx = options.iter().position(|o| o == current).unwrap_or(0);
+    Row {
+        label: label.into(),
+        path: path.into(),
+        options,
+        idx,
+        binding: false,
+    }
+}
+
+/// Build the editable rows: one per bindable control (button), then the handful
+/// of cyclable settings. Returns `(rows, number_of_binding_rows)`.
+fn build_rows(cfg: &Value) -> (Vec<Row>, usize) {
+    let mut rows = Vec::new();
+    let bindings = cfg["bindings"].as_object();
+    for ctrl in bindable_controls(cfg) {
+        let mut options = vec![UNBOUND.to_string()];
+        options.extend(ACTIONS.iter().map(|(v, _)| v.to_string()));
+        let cur = bindings.and_then(|b| b.get(&ctrl)).and_then(Value::as_str);
+        if let Some(a) = cur {
+            if !options.iter().any(|o| o == a) {
+                options.push(a.to_string()); // preserve an unknown/custom action
+            }
+        }
+        let idx = cur
+            .and_then(|a| options.iter().position(|o| o == a))
+            .unwrap_or(0);
+        rows.push(Row {
+            label: ctrl.clone(),
+            path: format!("bindings.{ctrl}"),
+            options,
+            idx,
+            binding: true,
+        });
+    }
+    let n_bindings = rows.len();
+
+    let backend = cfg["backend"].as_str().unwrap_or("herdr");
+    rows.push(choice_row(
+        "backend",
+        "backend",
+        &["herdr", "tmux"],
+        backend,
+    ));
+    let invert = config::get_path(cfg, "settings.scroll.invert")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    rows.push(choice_row(
+        "scroll invert",
+        "settings.scroll.invert",
+        &["false", "true"],
+        if invert { "true" } else { "false" },
+    ));
+    let voice = config::get_path(cfg, "settings.voice.mode")
+        .and_then(Value::as_str)
+        .unwrap_or("both");
+    rows.push(choice_row(
+        "voice mode",
+        "settings.voice.mode",
+        &["both", "hold", "toggle"],
+        voice,
+    ));
+
+    (rows, n_bindings)
+}
+
+fn render_row(r: &Row, selected: bool, label_w: usize) -> String {
+    let val = &r.options[r.idx];
+    if selected {
+        format!(
+            "{} {}  {}",
+            style("❯").cyan().bold(),
+            style(format!("{:<label_w$}", r.label)).bold(),
+            style(format!(" ‹ {val} › ")).black().on_cyan()
+        )
+    } else {
+        let label = format!("{:<label_w$}", r.label);
+        let shown = if val == UNBOUND {
+            style(UNBOUND).dim().to_string()
+        } else {
+            val.clone()
+        };
+        format!("  {label}  {shown}")
+    }
+}
+
+fn build_frame(rows: &[Row], sel: usize, n_bindings: usize, label_w: usize) -> Vec<String> {
+    let mut out = vec![
+        style("edit mapping.json").bold().to_string(),
+        style("buttons").cyan().bold().to_string(),
+    ];
+    for (i, r) in rows.iter().enumerate() {
+        if i == n_bindings {
+            out.push(style("settings").cyan().bold().to_string());
+        }
+        out.push(render_row(r, i == sel, label_w));
+    }
+    out.push(String::new());
+    out.push(
+        style("↑/↓ button   ←/→ action   enter save   esc cancel")
+            .dim()
+            .to_string(),
+    );
+    out
+}
+
 fn edit(cfg_path: &Path) -> Result<(), String> {
     require_tty()?;
     let mut cfg = config::load(cfg_path)?;
+    let (mut rows, n_bindings) = build_rows(&cfg);
+    if rows.is_empty() {
+        return Err("nothing to edit (run `cc-controller calibrate` first)".into());
+    }
+    let label_w = rows.iter().map(|r| r.label.len()).max().unwrap_or(0);
 
-    cliclack::intro(style(" edit settings ").on_cyan().black()).map_err(ui_err)?;
+    let term = Term::stderr();
+    let _ = term.hide_cursor();
+    let mut sel = 0usize;
+    let mut prev_lines: Option<usize> = None;
 
-    let backend: String = cliclack::select("Backend")
-        .initial_value(cfg["backend"].as_str().unwrap_or("herdr").to_string())
-        .item("herdr".to_string(), "herdr", "the herdr multiplexer")
-        .item("tmux".to_string(), "tmux", "tmux (window/session/pane)")
-        .interact()
-        .map_err(ui_err)?;
-    config::set_path(&mut cfg, "backend", &backend)?;
+    let saved = loop {
+        let frame = build_frame(&rows, sel, n_bindings, label_w);
+        if let Some(n) = prev_lines {
+            let _ = term.clear_last_lines(n);
+        }
+        for line in &frame {
+            let _ = term.write_line(line);
+        }
+        prev_lines = Some(frame.len());
 
-    let invert = cliclack::confirm("Invert scroll direction?")
-        .initial_value(
-            config::get_path(&cfg, "settings.scroll.invert")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-        )
-        .interact()
-        .map_err(ui_err)?;
-    config::set_path(&mut cfg, "settings.scroll.invert", &invert.to_string())?;
+        match term.read_key() {
+            Ok(Key::ArrowUp) => sel = (sel + rows.len() - 1) % rows.len(),
+            Ok(Key::ArrowDown) => sel = (sel + 1) % rows.len(),
+            Ok(Key::ArrowLeft) => {
+                let r = &mut rows[sel];
+                r.idx = (r.idx + r.options.len() - 1) % r.options.len();
+            }
+            Ok(Key::ArrowRight) => {
+                let r = &mut rows[sel];
+                r.idx = (r.idx + 1) % r.options.len();
+            }
+            Ok(Key::Enter) => break true,
+            Ok(Key::Escape) => break false,
+            Ok(Key::Char(c)) if c == 'q' || c == '\u{3}' => break false,
+            Ok(_) => {}            // ignore unmapped keys
+            Err(_) => break false, // EOF / read error -> cancel (never spin)
+        }
+    };
 
-    let voice: String = cliclack::select("Voice button mode")
-        .initial_value(
-            config::get_path(&cfg, "settings.voice.mode")
-                .and_then(Value::as_str)
-                .unwrap_or("both")
-                .to_string(),
-        )
-        .item("both".to_string(), "both", "tap = toggle, hold = momentary")
-        .item("hold".to_string(), "hold", "momentary only")
-        .item("toggle".to_string(), "toggle", "tap on/off only")
-        .interact()
-        .map_err(ui_err)?;
-    config::set_path(&mut cfg, "settings.voice.mode", &voice)?;
+    let _ = term.show_cursor();
+    if !saved {
+        let _ = term.write_line(&style("cancelled — no changes saved").dim().to_string());
+        return Ok(());
+    }
 
+    for r in &rows {
+        if r.binding && r.idx == 0 {
+            // unbound: drop the binding key if present
+            if let Some(b) = cfg["bindings"].as_object_mut() {
+                b.remove(&r.label);
+            }
+        } else {
+            config::set_path(&mut cfg, &r.path, &r.options[r.idx])?;
+        }
+    }
     config::save(cfg_path, &cfg)?;
-    cliclack::note(
-        "Saved",
-        format!(
-            "backend        {}\nscroll.invert  {}\nvoice.mode     {}",
-            style(&backend).cyan(),
-            style(invert).cyan(),
-            style(&voice).cyan()
-        ),
-    )
-    .map_err(ui_err)?;
-    cliclack::outro(style("settings updated").green()).map_err(ui_err)?;
+    let _ = term.write_line(&format!(
+        "{} {}",
+        style("✓").green().bold(),
+        style("saved").green()
+    ));
     Ok(())
 }
