@@ -1,104 +1,132 @@
 # Usage & configuration
 
-Full reference for cc-herdr-controller. See the [README](../README.md) for
-install and quick start, and [troubleshooting](troubleshooting.md) for macOS
-permissions and known caveats.
+Full reference for cc-controller. See the [README](../README.md) for install and
+quick start, and [troubleshooting](troubleshooting.md) for macOS permissions and
+known caveats.
 
 ## How it works
 
 ```
 Controller (USB/Bluetooth)
-        │  SDL / pygame
+        │  SDL2
         ▼
-controller_daemon.py ──► herdr CLI ──► herdr socket ──► herdr server
-                                       (tabs / workspaces / panes / keys / text)
+cc-controller ──► dispatch ──► herdr / tmux CLI ──► multiplexer socket
+   (reads pad,                  (tabs/windows · workspaces/sessions · panes · keys · text)
+    maps to intents)
 ```
 
-**Everything goes through herdr's socket** — navigation, scroll (as mouse-wheel
-escape sequences via `send-text`), and voice (streamed spaces). Nothing uses
-OS-level input injection, so it all works with the Mac **headless / over SSH**
-and needs no Accessibility permission. The daemon just needs to read the
-controller (Input Monitoring) on whichever machine the controller is plugged in.
+You bind **friendly control names** (`A`, `ZL`, `dpad_up`, `right_y`) to abstract
+**actions** (`tab_next`, `pane_left`, …). A per-controller `profile` translates
+names to raw SDL indices, so `mapping.json` stays readable and `calibrate` keeps
+the indices right for your unit. Each action becomes a compact **intent** that
+the chosen backend turns into herdr/tmux CLI calls against the multiplexer's
+local socket — **no OS-level input injection**, so it all works with the host
+headless / over SSH.
 
-You bind **friendly control names** (`A`, `ZL`, `dpad_up`, `right_y`) to actions.
-A per-controller `profile` translates those names to raw SDL indices, so the
-config stays readable and `--calibrate` keeps the indices correct for your unit.
+Three modes, run from one binary:
+
+- **`local`** — controller and multiplexer on the same machine. Intents dispatch
+  in-process; no SSH, no network.
+- **`remote`** — controller here, multiplexer on another machine. Intents stream
+  over one persistent SSH connection to `cc-controller host` on the far end,
+  which runs the chatty herdr/tmux work against the *local* socket. See
+  [remote setup](rust-remote.md).
+- **`host`** — the dispatcher `remote` spawns over SSH. Reads intents on stdin
+  and drives the local multiplexer. You rarely run it by hand (handy for
+  debugging: `echo 'tab_next' | cc-controller host --backend tmux`).
 
 > Only one process can own a controller at a time. Stop any other instance
-> (or your old daemon) before running this one, or you'll get
-> `Couldn't setup USB mode` / `No controller detected`.
+> before running this one, or you'll get `No controller detected`.
 
-The daemon must run on the **same machine as herdr** (it reads
-`HERDR_SOCKET_PATH`), with the controller plugged into that machine.
-
-## Modes
+## Commands
 
 ```bash
-.venv/bin/python controller_daemon.py --list        # detected controllers
-.venv/bin/python controller_daemon.py --calibrate    # press each control -> builds the profile
-.venv/bin/python controller_daemon.py --discover      # raw index + the name it maps to
-.venv/bin/python controller_daemon.py --monitor       # show input -> action, do NOTHING
-.venv/bin/python controller_daemon.py --monitor --perform   # show AND drive herdr
-.venv/bin/python controller_daemon.py                 # run (drives herdr)
-.venv/bin/python controller_daemon.py --dry-run       # run, but perform nothing
+cc-controller local   [run|start|stop|status] [--dry-run] [--backend herdr|tmux]
+cc-controller remote  [run|start|stop|status] [--dry-run] [--host user@mac] [--backend …]
+cc-controller host    [--backend herdr|tmux]      # usually spawned over SSH by `remote`
+
+cc-controller list                                 # detected controllers
+cc-controller discover                             # raw input + the name each maps to
+cc-controller calibrate                            # press each control -> build the profile
+
+cc-controller config show | get <path> | set <path> <value> | bind | edit | path
+
+cc-controller --config <path> …                    # use a specific mapping.json (global)
 ```
 
-Background control:
+The action defaults to `run` (foreground). `--dry-run` performs nothing — it
+prints the intents each input would send, so you can test a mapping without a
+multiplexer. `--tmux` is shorthand for `--backend tmux`.
 
-```bash
-.venv/bin/python controller_daemon.py --bg      # start detached (logs to .daemon.log)
-.venv/bin/python controller_daemon.py --status  # is it running?
-.venv/bin/python controller_daemon.py --stop    # stop the background daemon
-```
+## Backends: herdr or tmux
 
-`--monitor` is "watch what it would do"; add `--perform` to let it act. Both
-`--discover` and the run loop print a heartbeat so a silent screen tells you
-whether input is arriving at all.
+The same bindings drive **either** multiplexer. Actions are abstract, so each
+backend just reinterprets them through its own vocabulary — you don't re-bind
+anything:
+
+| Abstract action | herdr | tmux |
+|---|---|---|
+| `tab_next` / `tab_prev` (ZL/ZR) | next/prev tab | `next-window` / `previous-window` |
+| `workspace_next` / `workspace_prev` (L/R) | next/prev workspace | `switch-client -n` / `-p` (session) |
+| `pane_left/right/up/down` (D-pad) | pane focus | `select-pane -L/-R/-U/-D` |
+| `pane_zoom` (X) | toggle zoom | `resize-pane -Z` |
+| `enter` / `escape`, arrows, voice | `send-keys` / `send-text` | `send-keys` (literal for text) |
+| scroll (right stick) | SGR wheel via `send-text` | SGR wheel via `send-keys -l` |
+
+Pick the backend with `--backend tmux` / `--tmux` per run, or make it the default
+with `cc-controller config set backend tmux`. For `remote`, the controller
+forwards the resolved backend to `cc-controller host`, so set it on the
+controller side.
+
+> tmux window/session/pane commands act on the **current** target. With one
+> attached client that's the session and pane you're looking at; with several,
+> tmux acts on the most recently active one. `workspace_*` (session switch) needs
+> an attached client — headless it's a no-op.
 
 ## Calibrate (recommended, one time per controller)
 
-Raw indices vary by OS/driver, so let the tool learn yours:
+Raw SDL indices vary by OS/driver, so let the tool learn yours:
 
 ```bash
-.venv/bin/python controller_daemon.py --calibrate
+cc-controller calibrate
 ```
 
-Press each control as prompted (Enter to skip one you don't have). It writes the
-`profile` in `mapping.json`. Buttons are stored as buttons, analog triggers
-(ZL/ZR) as axes, and the D-pad is handled automatically whether it reports as
-buttons or a hat.
+Press each control as prompted (Enter to skip one you don't have, `q`+Enter to
+stop). It writes the `profile` in `mapping.json`. Buttons are stored as buttons,
+analog triggers (ZL/ZR) as axes, and the D-pad is handled automatically whether
+it reports as buttons or a hat.
 
 ## Binding actions
 
-Edit only the `bindings` block in `mapping.json` — friendly name → action:
+Bind interactively:
 
-```json
-"bindings": {
-  "A": "enter",
-  "ZL": "tab_prev",
-  "ZR": "tab_next",
-  "Y": "voice",
-  "dpad_up": "pane_up"
-}
+```bash
+cc-controller config bind     # pick a control, then pick an action
+```
+
+…or set one directly, or hand-edit the `bindings` block in `mapping.json`
+(friendly name → action):
+
+```bash
+cc-controller config set bindings.A enter
 ```
 
 | Action | Effect |
 |---|---|
-| `tab_next` / `tab_prev` | focus next/prev tab in current workspace |
-| `workspace_next` / `workspace_prev` | focus next/prev workspace |
+| `tab_next` / `tab_prev` | next/prev tab (herdr) · window (tmux) |
+| `workspace_next` / `workspace_prev` | next/prev workspace (herdr) · session (tmux) |
 | `pane_left/right/up/down` | move pane focus directionally |
 | `pane_zoom` | toggle pane fullscreen |
 | `scroll_up` / `scroll_down` | scroll the focused program (mouse-wheel)¹ |
-| `enter` / `escape` | send Enter/Esc to focused pane |
+| `enter` / `escape` | send Enter/Esc to the focused pane |
 | `voice` | hold-space for Claude's voice mode (see Voice) |
 | `dictation` | run `settings.dictation_command` (OS dictation) |
 | `noop` | ignore |
 
-¹ Scrolling sends SGR mouse-wheel escape sequences through `send-text`, so it
-works over the socket (Mac headless). It scrolls the **focused program** and
-only when that program has mouse-tracking on (Claude Code, `less --mouse`,
-`htop`, `lazygit`, …). It does **not** scroll herdr's own scrollback buffer or a
-bare shell — see Scrolling below.
+¹ Scrolling sends SGR mouse-wheel escape sequences, so it works over the socket
+(host headless). It scrolls the **focused program** and only when that program
+has mouse-tracking on (Claude Code, `less --mouse`, `htop`, `lazygit`, …). It
+does **not** scroll the multiplexer's own scrollback — see Scrolling below.
 
 ### Default bindings
 
@@ -107,8 +135,8 @@ bare shell — see Scrolling below.
 | A / B | enter / escape |
 | X | pane zoom |
 | Y | voice (hold-space) |
-| L / R bumpers | workspace prev / next |
-| ZL / ZR triggers | tab prev / next |
+| L / R bumpers | workspace / session prev / next |
+| ZL / ZR triggers | tab / window prev / next |
 | D-pad | pane focus (directional) |
 | Left stick | arrow keys (4-way, repeats while held) |
 | Right stick ↕ | scroll (analog, accelerates) |
@@ -116,6 +144,35 @@ bare shell — see Scrolling below.
 The left stick sends `up/down/left/right` to the focused pane (4-way, dominant
 axis, key-repeat while held) — configured under `settings.arrows`. Remove that
 block to disable.
+
+## Editing config from the CLI
+
+`mapping.json` is the source of truth, but you rarely need to open it:
+
+```bash
+cc-controller config show                       # styled view of bindings + settings
+cc-controller config get bindings.ZR            # read a value (dotted path)
+cc-controller config set backend tmux           # write a value (coerces bool/number/string)
+cc-controller config set settings.scroll.invert true
+cc-controller config bind                        # interactive: control -> action
+cc-controller config edit                        # interactive: backend, scroll, voice
+cc-controller config path                        # where is mapping.json?
+```
+
+`config set` / `bind` / `edit` rewrite the file with key order and the `_comment`
+documentation keys preserved (they do normalise whitespace to canonical JSON).
+`bind` and `edit` need an interactive terminal.
+
+## Background daemon
+
+`local` and `remote` can run detached (they share one PID file, since only one
+process can own the controller):
+
+```bash
+cc-controller local start      # detached; logs to .cc-controller.log next to mapping.json
+cc-controller local status     # running?
+cc-controller local stop       # stop it
+```
 
 ## Scrolling
 
@@ -126,19 +183,18 @@ block to disable.
 ```
 
 The further you push, the more wheel notches per tick (acceleration), up to
-`max_lines`. Flip `invert` if up/down feel backwards.
+`max_lines`. Flip `invert` if up/down feel backwards (`config set
+settings.scroll.invert true`).
 
-**Why mouse-wheel and not PageUp?** herdr rejects `pageup`/`pagedown` over the
-socket and exposes no scrollback-scroll command. A mouse wheel, though, is just
-an escape sequence on the program's input, which `send-text` delivers over the
-socket. The trade-off: it drives the focused **program's** scroll (e.g. Claude's
-transcript), not herdr's multiplexer scrollback. True scrollback scrolling would
-need a herdr `pane scroll` socket command.
+**Why mouse-wheel and not PageUp?** A mouse wheel is just an escape sequence on
+the program's input, which both backends can deliver over the socket. The
+trade-off: it drives the focused **program's** scroll (e.g. Claude's transcript),
+not the multiplexer's own scrollback.
 
 ## Voice
 
-The Switch Pro Controller has **no microphone** — voice input uses your machine's
-mic. Two approaches, pick per button:
+The Switch Pro Controller has **no microphone** — voice input uses the
+multiplexer machine's mic. Two approaches, pick per button:
 
 - **`voice`** (default on Y) — emulates Claude Code's **hold-space** by streaming
   spaces to the focused pane while active. `settings.voice`:
@@ -151,5 +207,5 @@ mic. Two approaches, pick per button:
   `hold` (momentary only), or `toggle` (tap on/off only).
 
 - **`dictation`** — fires an OS dictation hotkey via `settings.dictation_command`
-  (macOS `shortcuts run`/`osascript`; Windows `Win+H`). For OS-level dictation
-  rather than Claude's in-app voice.
+  (macOS `shortcuts run`/`osascript`; Windows `Win+H`). Runs on the machine where
+  the **controller** is read (handy in remote mode, where the mic is elsewhere).

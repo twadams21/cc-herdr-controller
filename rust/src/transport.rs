@@ -1,10 +1,13 @@
-//! Where intents go. A long-lived child process consumes newline-delimited
-//! intents on its stdin and runs `relay.py` next to herdr — either over SSH to
-//! another machine (remote herdr) or as a local subprocess (herdr on *this*
-//! machine). `StdoutTransport` is the no-op used by --dry-run / --monitor.
+//! Where intents go.
+//!
+//! - [`LocalTransport`] dispatches in-process (local mode — no child, no pipe).
+//! - [`ChildTransport`] (via [`ssh_transport`]) streams newline-delimited
+//!   intents over one persistent SSH connection to `cc-controller host` on the
+//!   multiplexer machine.
+//! - [`StdoutTransport`] is the no-op used by `--dry-run`.
 
+use crate::dispatch::{self, Backend};
 use std::io::Write;
-use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
 
 pub trait Transport {
@@ -17,6 +20,26 @@ pub struct StdoutTransport;
 impl Transport for StdoutTransport {
     fn send(&mut self, intent: &str) {
         println!("    -> intent: {intent}");
+    }
+}
+
+/// Dispatches intents in-process against a local herdr/tmux — `local` mode.
+/// No subprocess, no pipe: the run loop's intent goes straight to `dispatch`.
+pub struct LocalTransport {
+    backend: Backend,
+}
+
+impl LocalTransport {
+    pub fn new(backend: Backend) -> Self {
+        LocalTransport { backend }
+    }
+}
+
+impl Transport for LocalTransport {
+    fn send(&mut self, intent: &str) {
+        if let Err(e) = dispatch::handle_intent(intent, self.backend) {
+            eprintln!("[local] {intent:?}: {e}");
+        }
     }
 }
 
@@ -71,6 +94,16 @@ impl ChildTransport {
     }
 }
 
+impl Drop for ChildTransport {
+    fn drop(&mut self) {
+        // Kill the SSH child on a clean exit so it doesn't linger reparented.
+        if let Some(mut c) = self.child.take() {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+    }
+}
+
 impl Transport for ChildTransport {
     fn send(&mut self, intent: &str) {
         for _ in 0..2 {
@@ -94,41 +127,19 @@ impl Transport for ChildTransport {
     }
 }
 
-/// `ssh <host> <relay_cmd>` — herdr on another machine. One persistent
-/// connection; the relay runs herdr against its *local* socket so only the
+/// `ssh <host> <remote_cmd>` — the multiplexer on another machine. One
+/// persistent connection; `remote_cmd` runs `cc-controller host` next to
+/// herdr/tmux, executing intents against the *local* socket, so only the
 /// compact intent crosses the network.
 pub fn ssh_transport(
     host: String,
     extra_args: Vec<String>,
-    relay_cmd: String,
+    remote_cmd: String,
 ) -> Result<ChildTransport, String> {
-    let label = format!("ssh {host} {relay_cmd}");
+    let label = format!("ssh {host} {remote_cmd}");
     ChildTransport::new(label, move || {
         let mut c = Command::new("ssh");
-        c.args(&extra_args).arg(&host).arg(&relay_cmd);
-        c
-    })
-}
-
-/// Run the relay as a local subprocess — herdr on *this* machine, no SSH. The
-/// relay is launched through the shell from `dir` (the repo root, so it can
-/// find relay.py / herdr.py) and inherits our environment, including whatever
-/// the running herdr session exposes for its socket.
-pub fn local_transport(relay_cmd: String, dir: Option<PathBuf>) -> Result<ChildTransport, String> {
-    let label = format!("local: {relay_cmd}");
-    ChildTransport::new(label, move || {
-        let mut c = if cfg!(windows) {
-            let mut c = Command::new("cmd");
-            c.arg("/C").arg(&relay_cmd);
-            c
-        } else {
-            let mut c = Command::new("sh");
-            c.arg("-c").arg(&relay_cmd);
-            c
-        };
-        if let Some(d) = &dir {
-            c.current_dir(d);
-        }
+        c.args(&extra_args).arg(&host).arg(&remote_cmd);
         c
     })
 }

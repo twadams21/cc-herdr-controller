@@ -106,8 +106,9 @@ pub fn run_discover(cfg: &Value) -> Result<(), String> {
         axis_index.iter().map(|(n, i)| (*i, n.clone())).collect();
     let mut pump = sdl.event_pump()?;
 
-    println!("\nDISCOVER - press each control; Ctrl-C to quit.");
-    println!("Shows raw index and the name your profile assigns it.\n");
+    crate::ui::banner("DISCOVER", "press each control; Ctrl-C to quit");
+    crate::ui::hint("Shows raw index and the name your profile assigns it.");
+    println!();
     let mut seen: u64 = 0;
     let mut last_beat = Instant::now();
     loop {
@@ -221,8 +222,9 @@ pub fn run_calibrate(cfg_path: &Path) -> Result<(), String> {
         }
     }
 
-    println!("\nCALIBRATE - press each control when prompted.");
-    println!("Press Enter (in this terminal) to skip a control; type q + Enter to stop.\n");
+    crate::ui::banner("CALIBRATE", "press each control when prompted");
+    crate::ui::hint("Press Enter (in this terminal) to skip a control; type q + Enter to stop.");
+    println!();
     for name in CALIBRATION_ORDER {
         print!("  press [{name}] (Enter=skip, q=quit): ");
         std::io::stdout().flush().ok();

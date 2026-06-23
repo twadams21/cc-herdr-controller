@@ -45,6 +45,59 @@ pub fn save(path: &Path, cfg: &Value) -> Result<(), String> {
     std::fs::write(path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))
 }
 
+/// Follow a dotted path (e.g. `backend`, `bindings.A`, `settings.scroll.invert`)
+/// and return the value if present.
+pub fn get_path<'a>(cfg: &'a Value, path: &str) -> Option<&'a Value> {
+    let mut cur = cfg;
+    for key in path.split('.') {
+        cur = cur.get(key)?;
+    }
+    Some(cur)
+}
+
+/// Set a dotted path, creating intermediate objects as needed. The raw string
+/// is coerced to bool / integer / float / else string. Returns the value set.
+pub fn set_path(cfg: &mut Value, path: &str, raw: &str) -> Result<Value, String> {
+    let keys: Vec<&str> = path.split('.').collect();
+    if keys.iter().any(|k| k.is_empty()) {
+        return Err(format!("invalid path: {path:?}"));
+    }
+    let value = coerce(raw);
+    let mut cur = cfg;
+    for key in &keys[..keys.len() - 1] {
+        if !cur.is_object() {
+            *cur = Value::Object(serde_json::Map::new());
+        }
+        cur = cur
+            .as_object_mut()
+            .unwrap()
+            .entry((*key).to_string())
+            .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    }
+    if !cur.is_object() {
+        *cur = Value::Object(serde_json::Map::new());
+    }
+    let last = keys[keys.len() - 1].to_string();
+    cur.as_object_mut().unwrap().insert(last, value.clone());
+    Ok(value)
+}
+
+/// Coerce a CLI string into the most natural JSON scalar.
+fn coerce(raw: &str) -> Value {
+    match raw {
+        "true" => return Value::Bool(true),
+        "false" => return Value::Bool(false),
+        _ => {}
+    }
+    if let Ok(i) = raw.parse::<i64>() {
+        return Value::from(i);
+    }
+    if let Ok(f) = raw.parse::<f64>() {
+        return Value::from(f);
+    }
+    Value::String(raw.to_string())
+}
+
 /// `(button_index -> name, axis_name -> index)` from the `profile` block,
 /// skipping any `_comment` keys.
 pub fn name_maps(

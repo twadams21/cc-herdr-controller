@@ -7,9 +7,29 @@ use sdl2::event::Event;
 use sdl2::joystick::HatState;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 const SCROLL_BUTTON_NOTCH: i32 = 3;
+
+/// Set by SIGINT/SIGTERM so the loop returns cleanly (dropping the transport,
+/// which kills any SSH child). On non-unix we rely on default Ctrl-C handling.
+static STOP: AtomicBool = AtomicBool::new(false);
+
+#[cfg(unix)]
+fn install_signal_handlers() {
+    extern "C" fn handle(_sig: libc::c_int) {
+        STOP.store(true, Ordering::SeqCst);
+    }
+    // SAFETY: the handler only stores into an AtomicBool (async-signal-safe).
+    unsafe {
+        libc::signal(libc::SIGINT, handle as *const () as libc::sighandler_t);
+        libc::signal(libc::SIGTERM, handle as *const () as libc::sighandler_t);
+    }
+}
+
+#[cfg(not(unix))]
+fn install_signal_handlers() {}
 
 fn run_dictation(cmd: &Option<String>) {
     if let Some(c) = cmd {
@@ -157,13 +177,19 @@ pub fn run_loop(
     let mut last_beat = Instant::now();
 
     let mode = if perform {
-        "driving herdr"
+        "driving the multiplexer — Ctrl-C to quit"
     } else {
-        "OBSERVING ONLY - not performing"
+        "OBSERVING ONLY, not performing — Ctrl-C to quit"
     };
-    println!("\n{label} - {mode}. Ctrl-C to quit.\n");
+    crate::ui::banner(label, mode);
+    println!();
+    install_signal_handlers();
 
     loop {
+        if STOP.load(Ordering::Relaxed) {
+            println!("\nbye");
+            return Ok(());
+        }
         let now = Instant::now();
         for ev in pump.poll_iter() {
             match ev {
@@ -192,16 +218,16 @@ pub fn run_loop(
                         None => println!("{name} (button {bi})  (unbound)"),
                     }
                 }
-                Event::JoyButtonUp { button_idx, .. } => {
-                    if Some(button_idx as u32) == voice_idx && v_pressing {
-                        v_pressing = false;
-                        let held = now.duration_since(v_down);
-                        v_latched = match voice_mode.as_str() {
-                            "hold" => false,
-                            "toggle" => !v_latched,
-                            _ => held <= voice_tap_max && !v_latched,
-                        };
-                    }
+                Event::JoyButtonUp { button_idx, .. }
+                    if Some(button_idx as u32) == voice_idx && v_pressing =>
+                {
+                    v_pressing = false;
+                    let held = now.duration_since(v_down);
+                    v_latched = match voice_mode.as_str() {
+                        "hold" => false,
+                        "toggle" => !v_latched,
+                        _ => held <= voice_tap_max && !v_latched,
+                    };
                 }
                 Event::JoyHatMotion { state, .. } if state != HatState::Centered => {
                     seen += 1;

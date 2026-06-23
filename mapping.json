@@ -1,5 +1,8 @@
 {
-  "_comment": "Edit `bindings` only — friendly control name -> herdr action. Actions: tab_next, tab_prev, workspace_next, workspace_prev, pane_left, pane_right, pane_up, pane_down, pane_zoom, scroll_up, scroll_down, enter, escape, voice, dictation, noop. Scrolling is analog (right stick) configured under settings.scroll. The `profile` maps each friendly name to the raw SDL index; run `--calibrate` to rebuild it.",
+  "_comment": "Edit `bindings` only — friendly control name -> action. Actions: tab_next, tab_prev, workspace_next, workspace_prev, pane_left, pane_right, pane_up, pane_down, pane_zoom, scroll_up, scroll_down, enter, escape, voice, dictation, noop. Scrolling is analog (right stick) configured under settings.scroll. The `profile` maps each friendly name to the raw SDL index; run `cc-controller calibrate` to rebuild it. Edit interactively with `cc-controller config bind` / `config edit`, or `config set <path> <value>`.",
+
+  "_backend_comment": "Which multiplexer the same bindings drive: \"herdr\" (default) or \"tmux\". Actions are abstract — tmux reads tab=window, workspace=session, pane=pane. So tab_next/prev (ZL/ZR) become next/previous-window, workspace_next/prev (L/R) switch sessions, pane_* select-pane. Override per-run with `--backend <name>`; for remote mode the backend is chosen here (the controller sends backend-neutral intents and forwards the resolved backend to `cc-controller host`).",
+  "backend": "herdr",
 
   "bindings": {
     "A": "enter",
@@ -17,19 +20,14 @@
   },
 
   "remote": {
-    "_comment": "Rust V2 only: where the herdr relay runs. ssh_host is any valid ssh target (user@host or a ~/.ssh/config alias). relay_cmd is run on the Mac and reads intents on stdin. Leave ssh_host empty to require --host. The Python daemon ignores this block.",
+    "_comment": "Used by `cc-controller remote`: where the multiplexer machine is. ssh_host is any valid ssh target (user@host or a ~/.ssh/config alias). host_bin is the cc-controller binary on that machine (PATH name or absolute path); `remote` runs `<host_bin> host` over ssh and streams intents to it. Leave ssh_host empty to require --host. Ignored by `local`.",
     "ssh_host": "",
     "ssh_args": [],
-    "relay_cmd": "cd ~/cc-herdr-controller && python3 relay.py"
-  },
-
-  "local": {
-    "_comment": "Rust V2 --local mode: run herdr on THIS machine, no SSH. relay_cmd is run via the shell from the repo root (next to herdr.py/relay.py) and reads intents on stdin. The Python daemon ignores this block.",
-    "relay_cmd": "python3 relay.py"
+    "host_bin": "cc-controller"
   },
 
   "profile": {
-    "_comment": "friendly name -> raw SDL index. Defaults are for the Switch Pro via SDL; if buttons feel wrong, run: python controller_daemon.py --calibrate",
+    "_comment": "friendly name -> raw SDL index. Defaults are for the Switch Pro via SDL; if buttons feel wrong, run: cc-controller calibrate",
     "buttons": {
       "A": 0, "B": 1, "X": 2, "Y": 3,
       "minus": 4, "home": 5, "plus": 6,
