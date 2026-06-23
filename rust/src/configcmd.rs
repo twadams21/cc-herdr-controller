@@ -54,15 +54,19 @@ fn value_str(v: &Value) -> String {
 
 fn show(cfg_path: &Path) -> Result<(), String> {
     let cfg = config::load(cfg_path)?;
+    let mut lines: Vec<String> = Vec::new();
 
-    println!(
-        "{}  {}",
+    lines.push(format!(
+        "{}   {}",
         style("backend").bold(),
         style(cfg["backend"].as_str().unwrap_or("herdr")).cyan()
-    );
+    ));
 
-    println!("\n{}", style("bindings").bold().underlined());
+    lines.push(String::new());
+    lines.push(style("bindings").bold().to_string());
     if let Some(b) = cfg["bindings"].as_object() {
+        // Pad the plain control name to width, THEN colour it, so the ANSI
+        // codes don't throw the column alignment off.
         let width = b
             .keys()
             .filter(|k| *k != "_comment")
@@ -73,19 +77,23 @@ fn show(cfg_path: &Path) -> Result<(), String> {
             if ctrl == "_comment" {
                 continue;
             }
-            println!(
-                "  {:<width$}  {}",
-                style(ctrl).green(),
-                value_str(act),
-                width = width
-            );
+            lines.push(format!(
+                "  {}  {}",
+                style(format!("{ctrl:<width$}")).green(),
+                value_str(act)
+            ));
         }
     }
 
-    println!("\n{}", style("settings").bold().underlined());
+    lines.push(String::new());
+    lines.push(style("settings").bold().to_string());
     for key in ["trigger_threshold", "dictation_command"] {
         if let Some(v) = config::get_path(&cfg, &format!("settings.{key}")) {
-            println!("  {:<18}  {}", style(key).dim(), value_str(v));
+            lines.push(format!(
+                "  {}  {}",
+                style(format!("{key:<18}")).dim(),
+                value_str(v)
+            ));
         }
     }
     for group in ["scroll", "arrows", "voice"] {
@@ -97,11 +105,16 @@ fn show(cfg_path: &Path) -> Result<(), String> {
                 .filter(|(k, _)| *k != "_comment")
                 .map(|(k, v)| format!("{k}={}", value_str(v)))
                 .collect();
-            println!("  {:<18}  {}", style(group).dim(), inline.join("  "));
+            lines.push(format!(
+                "  {}  {}",
+                style(format!("{group:<18}")).dim(),
+                inline.join("  ")
+            ));
         }
     }
 
-    println!("\n{} {}", style("file:").dim(), cfg_path.display());
+    crate::ui::boxed("config", &lines);
+    println!("{} {}", style("file:").dim(), cfg_path.display());
     Ok(())
 }
 
@@ -185,7 +198,12 @@ fn bind(cfg_path: &Path) -> Result<(), String> {
 
     config::set_path(&mut cfg, &format!("bindings.{control}"), &action)?;
     config::save(cfg_path, &cfg)?;
-    cliclack::outro(format!("{control} → {action}")).map_err(ui_err)?;
+    cliclack::note(
+        "Saved",
+        format!("{} → {}", style(&control).green(), style(&action).cyan()),
+    )
+    .map_err(ui_err)?;
+    cliclack::outro(style("binding updated").green()).map_err(ui_err)?;
     Ok(())
 }
 
@@ -228,6 +246,16 @@ fn edit(cfg_path: &Path) -> Result<(), String> {
     config::set_path(&mut cfg, "settings.voice.mode", &voice)?;
 
     config::save(cfg_path, &cfg)?;
-    cliclack::outro("saved").map_err(ui_err)?;
+    cliclack::note(
+        "Saved",
+        format!(
+            "backend        {}\nscroll.invert  {}\nvoice.mode     {}",
+            style(&backend).cyan(),
+            style(invert).cyan(),
+            style(&voice).cyan()
+        ),
+    )
+    .map_err(ui_err)?;
+    cliclack::outro(style("settings updated").green()).map_err(ui_err)?;
     Ok(())
 }
