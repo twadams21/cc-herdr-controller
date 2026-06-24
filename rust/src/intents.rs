@@ -38,6 +38,11 @@ pub fn scroll_intent(lines: i32) -> String {
     format!("scroll {lines}")
 }
 
+/// `hscroll <signed>` — positive = right.
+pub fn hscroll_intent(lines: i32) -> String {
+    format!("hscroll {lines}")
+}
+
 /// `keys <name>` — e.g. an arrow direction.
 pub fn keys_intent(name: &str) -> String {
     format!("keys {name}")

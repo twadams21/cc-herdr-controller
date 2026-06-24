@@ -26,6 +26,8 @@ impl std::error::Error for DispatchError {}
 /// so it scrolls the focused *program* (not the multiplexer's own scrollback).
 const WHEEL_UP: &str = "\x1b[<64;1;1M";
 const WHEEL_DOWN: &str = "\x1b[<65;1;1M";
+const WHEEL_LEFT: &str = "\x1b[<66;1;1M";
+const WHEEL_RIGHT: &str = "\x1b[<67;1;1M";
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Backend {
@@ -103,6 +105,13 @@ impl Backend {
             Backend::Tmux => tmux::scroll(lines),
         }
     }
+
+    pub fn hscroll(self, lines: i64) -> Result<(), DispatchError> {
+        match self {
+            Backend::Herdr => herdr::hscroll(lines),
+            Backend::Tmux => tmux::hscroll(lines),
+        }
+    }
 }
 
 /// Parse and run one wire intent (the protocol the run loop emits). Mirrors the
@@ -128,6 +137,12 @@ pub fn handle_intent(line: &str, backend: Backend) -> Result<(), DispatchError> 
                 .map_err(|_| DispatchError(format!("bad scroll amount: {:?}", args[0])))?;
             backend.scroll(n)
         }
+        "hscroll" if !args.is_empty() => {
+            let n = args[0]
+                .parse::<i64>()
+                .map_err(|_| DispatchError(format!("bad hscroll amount: {:?}", args[0])))?;
+            backend.hscroll(n)
+        }
         "keys" if !args.is_empty() => backend.send_keys(&args),
         "text" if !args.is_empty() => {
             let decoded = base64::engine::general_purpose::STANDARD
@@ -145,7 +160,7 @@ pub fn handle_intent(line: &str, backend: Backend) -> Result<(), DispatchError> 
 // ---- herdr backend ---------------------------------------------------------
 
 mod herdr {
-    use super::{neighbor, DispatchError, WHEEL_DOWN, WHEEL_UP};
+    use super::{neighbor, DispatchError, WHEEL_DOWN, WHEEL_LEFT, WHEEL_RIGHT, WHEEL_UP};
     use serde_json::Value;
     use std::process::Command;
 
@@ -268,23 +283,37 @@ mod herdr {
         run(&["pane", "send-text", pane.as_str(), text]).map(|_| ())
     }
 
-    pub fn scroll(lines: i64) -> Result<(), DispatchError> {
-        if lines == 0 {
+    /// Send `count` copies of a wheel escape sequence to the focused pane.
+    fn wheel(seq: &str, count: u64) -> Result<(), DispatchError> {
+        if count == 0 {
             return Ok(());
         }
         let Some(pane) = focused_pane()? else {
             return Ok(());
         };
-        let seq = if lines > 0 { WHEEL_UP } else { WHEEL_DOWN };
-        let payload = seq.repeat(lines.unsigned_abs() as usize);
+        let payload = seq.repeat(count as usize);
         run(&["pane", "send-text", pane.as_str(), &payload]).map(|_| ())
+    }
+
+    pub fn scroll(lines: i64) -> Result<(), DispatchError> {
+        wheel(
+            if lines > 0 { WHEEL_UP } else { WHEEL_DOWN },
+            lines.unsigned_abs(),
+        )
+    }
+
+    pub fn hscroll(lines: i64) -> Result<(), DispatchError> {
+        wheel(
+            if lines > 0 { WHEEL_RIGHT } else { WHEEL_LEFT },
+            lines.unsigned_abs(),
+        )
     }
 }
 
 // ---- tmux backend ----------------------------------------------------------
 
 mod tmux {
-    use super::{DispatchError, WHEEL_DOWN, WHEEL_UP};
+    use super::{DispatchError, WHEEL_DOWN, WHEEL_LEFT, WHEEL_RIGHT, WHEEL_UP};
     use std::process::Command;
 
     fn bin() -> String {
@@ -373,13 +402,26 @@ mod tmux {
         run(&["send-keys", "-l", "--", text])
     }
 
-    pub fn scroll(lines: i64) -> Result<(), DispatchError> {
-        if lines == 0 {
+    /// Send `count` copies of a wheel escape sequence to the active pane.
+    fn wheel(seq: &str, count: u64) -> Result<(), DispatchError> {
+        if count == 0 {
             return Ok(());
         }
-        let seq = if lines > 0 { WHEEL_UP } else { WHEEL_DOWN };
-        let payload = seq.repeat(lines.unsigned_abs() as usize);
-        run(&["send-keys", "-l", "--", &payload])
+        run(&["send-keys", "-l", "--", &seq.repeat(count as usize)])
+    }
+
+    pub fn scroll(lines: i64) -> Result<(), DispatchError> {
+        wheel(
+            if lines > 0 { WHEEL_UP } else { WHEEL_DOWN },
+            lines.unsigned_abs(),
+        )
+    }
+
+    pub fn hscroll(lines: i64) -> Result<(), DispatchError> {
+        wheel(
+            if lines > 0 { WHEEL_RIGHT } else { WHEEL_LEFT },
+            lines.unsigned_abs(),
+        )
     }
 }
 

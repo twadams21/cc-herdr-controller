@@ -139,11 +139,35 @@ does **not** scroll the multiplexer's own scrollback — see Scrolling below.
 | ZL / ZR triggers | tab / window prev / next |
 | D-pad | pane focus (directional) |
 | Left stick | arrow keys (4-way, repeats while held) |
-| Right stick ↕ | scroll (analog, accelerates) |
+| Right stick | scroll (2D analog, accelerates) |
 
-The left stick sends `up/down/left/right` to the focused pane (4-way, dominant
-axis, key-repeat while held) — configured under `settings.arrows`. Remove that
-block to disable.
+## Sticks
+
+Each analog stick has a configurable **behavior** — change them in `config edit`
+(the "left stick" / "right stick" rows) or with `config set`:
+
+| Behavior | Effect |
+|---|---|
+| `keys` | 4-way arrow keys to the focused pane (repeats while held) |
+| `panes` | 4-way pane focus (`pane_left/right/up/down`, one move per push) |
+| `scroll` | 2D wheel — push ↕ = vertical, ↔ = horizontal (accelerates) |
+| `off` | disabled |
+
+Defaults: **left = `keys`**, **right = `scroll`**. So to drive panes with the
+left stick: `cc-controller config set settings.sticks.left.behavior panes` (or
+flip it in `config edit`). Per-stick params live under
+`settings.sticks.{left,right}`:
+
+```json
+"sticks": {
+  "left":  { "behavior": "panes", "deadzone": 0.5, "repeat_ms": 150 },
+  "right": { "behavior": "scroll", "deadzone": 0.18, "tick_ms": 30, "max_lines": 6, "invert": false }
+}
+```
+
+`keys`/`panes` use `deadzone` + `repeat_ms`; `scroll` uses `deadzone` +
+`tick_ms` + `max_lines` + `invert`. The left stick maps to the `left_x`/`left_y`
+profile axes, the right stick to `right_x`/`right_y`.
 
 ## Editing config from the CLI
 
@@ -153,15 +177,15 @@ block to disable.
 cc-controller config show                       # styled view of bindings + settings
 cc-controller config get bindings.ZR            # read a value (dotted path)
 cc-controller config set backend tmux           # write a value (coerces bool/number/string)
-cc-controller config set settings.scroll.invert true
+cc-controller config set settings.sticks.left.behavior panes
 cc-controller config bind                        # quick: pick a control, pick an action
 cc-controller config edit                        # full-screen grid editor (below)
 cc-controller config path                        # where is mapping.json?
 ```
 
 `config edit` is an arrow-key grid for every button at once: **↑/↓** moves
-between buttons (and the cyclable settings — backend, scroll invert, voice
-mode), **←/→** changes the highlighted one's action/value (including `—` to
+between buttons (and the cyclable settings — left/right stick behavior, backend,
+voice mode), **←/→** changes the highlighted one's action/value (including `—` to
 unbind), **Enter** saves, **Esc** cancels. `config bind` is the quicker
 two-prompt path for a single control.
 
@@ -182,15 +206,11 @@ cc-controller local stop       # stop it
 
 ## Scrolling
 
-`settings.scroll` controls the analog right-stick scroll:
-
-```json
-"scroll": { "axis": "right_y", "invert": false, "deadzone": 0.18, "tick_ms": 30, "max_lines": 6 }
-```
-
-The further you push, the more wheel notches per tick (acceleration), up to
-`max_lines`. Flip `invert` if up/down feel backwards (`config set
-settings.scroll.invert true`).
+A stick set to `scroll` (right stick by default) sends mouse-wheel events: the
+further you push, the more wheel notches per `tick_ms` (acceleration) up to
+`max_lines`. It's **2D** — vertical *and* horizontal (the latter for programs
+that handle horizontal wheel). Flip vertical with `config set
+settings.sticks.right.invert true`.
 
 **Why mouse-wheel and not PageUp?** A mouse wheel is just an escape sequence on
 the program's input, which both backends can deliver over the socket. The

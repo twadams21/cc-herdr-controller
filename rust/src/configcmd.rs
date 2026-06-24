@@ -99,10 +99,12 @@ fn show(cfg_path: &Path) -> Result<(), String> {
             ));
         }
     }
-    for group in ["scroll", "arrows", "voice"] {
-        if let Some(obj) =
-            config::get_path(&cfg, &format!("settings.{group}")).and_then(Value::as_object)
-        {
+    for (label, path) in [
+        ("left stick", "settings.sticks.left"),
+        ("right stick", "settings.sticks.right"),
+        ("voice", "settings.voice"),
+    ] {
+        if let Some(obj) = config::get_path(&cfg, path).and_then(Value::as_object) {
             let inline: Vec<String> = obj
                 .iter()
                 .filter(|(k, _)| *k != "_comment")
@@ -110,7 +112,7 @@ fn show(cfg_path: &Path) -> Result<(), String> {
                 .collect();
             lines.push(format!(
                 "  {}  {}",
-                style(format!("{group:<18}")).dim(),
+                style(format!("{label:<18}")).dim(),
                 inline.join("  ")
             ));
         }
@@ -157,14 +159,21 @@ fn ui_err(e: std::io::Error) -> String {
     }
 }
 
-/// Control names that can be bound — profile buttons + axes (e.g. ZL/ZR).
+/// Control names that can be bound — profile buttons + trigger axes (ZL/ZR).
+/// The analog stick axes are excluded: they're driven by the per-stick
+/// behaviour (`config edit`'s left/right stick rows), not discrete bindings.
 fn bindable_controls(cfg: &Value) -> Vec<String> {
+    const STICK_AXES: [&str; 4] = ["left_x", "left_y", "right_x", "right_y"];
     let mut names = Vec::new();
     for group in ["buttons", "axes"] {
         if let Some(obj) =
             config::get_path(cfg, &format!("profile.{group}")).and_then(Value::as_object)
         {
-            names.extend(obj.keys().filter(|k| *k != "_comment").cloned());
+            names.extend(
+                obj.keys()
+                    .filter(|k| *k != "_comment" && !STICK_AXES.contains(&k.as_str()))
+                    .cloned(),
+            );
         }
     }
     names.sort();
@@ -263,21 +272,31 @@ fn build_rows(cfg: &Value) -> (Vec<Row>, usize) {
     }
     let n_bindings = rows.len();
 
+    const STICK: &[&str] = &["keys", "panes", "scroll", "off"];
+    let left = config::get_path(cfg, "settings.sticks.left.behavior")
+        .and_then(Value::as_str)
+        .unwrap_or("keys");
+    rows.push(choice_row(
+        "left stick",
+        "settings.sticks.left.behavior",
+        STICK,
+        left,
+    ));
+    let right = config::get_path(cfg, "settings.sticks.right.behavior")
+        .and_then(Value::as_str)
+        .unwrap_or("scroll");
+    rows.push(choice_row(
+        "right stick",
+        "settings.sticks.right.behavior",
+        STICK,
+        right,
+    ));
     let backend = cfg["backend"].as_str().unwrap_or("herdr");
     rows.push(choice_row(
         "backend",
         "backend",
         &["herdr", "tmux"],
         backend,
-    ));
-    let invert = config::get_path(cfg, "settings.scroll.invert")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    rows.push(choice_row(
-        "scroll invert",
-        "settings.scroll.invert",
-        &["false", "true"],
-        if invert { "true" } else { "false" },
     ));
     let voice = config::get_path(cfg, "settings.voice.mode")
         .and_then(Value::as_str)

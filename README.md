@@ -51,8 +51,9 @@ Run it detached with `cc-controller local start` (then `… status` / `… stop`
 
 Default layout: **bumpers** = workspaces/sessions, **triggers** = tabs/windows,
 **D-pad** = panes, **left stick** = arrow keys, **right stick** = scroll, **A/B**
-= enter/esc, **Y** = voice. Remap with `cc-controller config bind` (or edit
-`mapping.json`).
+= enter/esc, **Y** = voice. Remap buttons with `cc-controller config bind`, and
+set each **stick's behavior** (keys / panes / scroll / off) in `config edit` —
+e.g. left stick → pane navigation. Or edit `mapping.json` directly.
 
 **Prefer tmux?** The same bindings drive it — `--tmux` (or `cc-controller config
 set backend tmux`). Workspaces map to tmux sessions, tabs to windows, panes to
