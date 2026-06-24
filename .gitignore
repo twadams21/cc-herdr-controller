@@ -1,15 +1,8 @@
-# Python
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-env/
+# Runtime artifacts (background daemon)
+.cc-controller.pid
+.cc-controller.log
 
-# Runtime artifacts
-.daemon.pid
-.daemon.log
-
-# Rust (V2)
+# Rust
 rust/target/
 # vendored SDL2 MinGW dev libs (re-download with rust/setup-sdl2.ps1)
 rust/vendor/

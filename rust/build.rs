@@ -27,12 +27,23 @@ fn find_mingw_dir(manifest: &Path) -> PathBuf {
 }
 
 fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
+
+    // Only Windows needs the vendored MinGW SDL2. On macOS/Linux the `sdl2`
+    // crate links the system SDL2 via pkg-config (e.g. `brew install sdl2`),
+    // so there is nothing to locate or copy here.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return;
+    }
+
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
     let mingw = find_mingw_dir(&manifest);
 
-    println!("cargo:rustc-link-search=native={}", mingw.join("lib").display());
+    println!(
+        "cargo:rustc-link-search=native={}",
+        mingw.join("lib").display()
+    );
     println!("cargo:rerun-if-env-changed=SDL2_MINGW_DIR");
-    println!("cargo:rerun-if-changed=build.rs");
 
     // Copy SDL2.dll next to the final binary (target/<profile>/SDL2.dll) so
     // `cargo run` and the shipped exe find it without extra setup.

@@ -14,8 +14,24 @@ use std::time::{Duration, Instant};
 
 /// Order controls are requested during --calibrate (mirrors the Python tool).
 const CALIBRATION_ORDER: &[&str] = &[
-    "A", "B", "X", "Y", "L", "R", "ZL", "ZR", "minus", "plus", "home", "capture",
-    "lstick", "rstick", "dpad_up", "dpad_down", "dpad_left", "dpad_right",
+    "A",
+    "B",
+    "X",
+    "Y",
+    "L",
+    "R",
+    "ZL",
+    "ZR",
+    "minus",
+    "plus",
+    "home",
+    "capture",
+    "lstick_click",
+    "rstick_click",
+    "dpad_up",
+    "dpad_down",
+    "dpad_left",
+    "dpad_right",
 ];
 
 /// SDL i16 axis value -> -1.0..1.0 (matches pygame's normalization).
@@ -42,9 +58,11 @@ pub fn open_first(sdl: &Sdl) -> Result<Joystick, String> {
     let subsystem = sdl.joystick().map_err(|e| e.to_string())?;
     let n = subsystem.num_joysticks().map_err(|e| e.to_string())?;
     if n == 0 {
-        return Err("No controller detected. Paired / plugged in? Another process \
+        return Err(
+            "No controller detected. Paired / plugged in? Another process \
                     holding it? Only one program can own a controller at a time."
-            .into());
+                .into(),
+        );
     }
     let joy = subsystem.open(0).map_err(|e| e.to_string())?;
     println!(
@@ -88,8 +106,9 @@ pub fn run_discover(cfg: &Value) -> Result<(), String> {
         axis_index.iter().map(|(n, i)| (*i, n.clone())).collect();
     let mut pump = sdl.event_pump()?;
 
-    println!("\nDISCOVER - press each control; Ctrl-C to quit.");
-    println!("Shows raw index and the name your profile assigns it.\n");
+    crate::ui::banner("DISCOVER", "press each control; Ctrl-C to quit");
+    crate::ui::hint("Shows raw index and the name your profile assigns it.");
+    println!();
     let mut seen: u64 = 0;
     let mut last_beat = Instant::now();
     loop {
@@ -106,7 +125,9 @@ pub fn run_discover(cfg: &Value) -> Result<(), String> {
                     let d = hat_dir(state).unwrap_or("?");
                     println!("hat {hat_idx}  {state:?}   (dpad_{d})");
                 }
-                Event::JoyAxisMotion { axis_idx, value, .. } => {
+                Event::JoyAxisMotion {
+                    axis_idx, value, ..
+                } => {
                     let v = norm(value);
                     if v.abs() > 0.5 {
                         seen += 1;
@@ -121,8 +142,10 @@ pub fn run_discover(cfg: &Value) -> Result<(), String> {
         if last_beat.elapsed() >= Duration::from_secs(2) {
             last_beat = Instant::now();
             if seen == 0 {
-                println!("... listening, 0 events. If pressing does nothing, is another \
-                          app holding the controller?");
+                println!(
+                    "... listening, 0 events. If pressing does nothing, is another \
+                          app holding the controller?"
+                );
             } else {
                 println!("... listening ({seen} events so far)");
             }
@@ -162,10 +185,12 @@ fn await_input(pump: &mut EventPump, rx: &Receiver<String>) -> Cal {
         for ev in pump.poll_iter() {
             match ev {
                 Event::JoyButtonDown { button_idx, .. } => return Cal::Button(button_idx as u32),
-                Event::JoyAxisMotion { axis_idx, value, .. } if norm(value).abs() > 0.7 => {
-                    return Cal::Axis(axis_idx as u32)
+                Event::JoyAxisMotion {
+                    axis_idx, value, ..
+                } if norm(value).abs() > 0.7 => return Cal::Axis(axis_idx as u32),
+                Event::JoyHatMotion { state, .. } if state != HatState::Centered => {
+                    return Cal::Hat
                 }
-                Event::JoyHatMotion { state, .. } if state != HatState::Centered => return Cal::Hat,
                 _ => {}
             }
         }
@@ -197,8 +222,9 @@ pub fn run_calibrate(cfg_path: &Path) -> Result<(), String> {
         }
     }
 
-    println!("\nCALIBRATE - press each control when prompted.");
-    println!("Press Enter (in this terminal) to skip a control; type q + Enter to stop.\n");
+    crate::ui::banner("CALIBRATE", "press each control when prompted");
+    crate::ui::hint("Press Enter (in this terminal) to skip a control; type q + Enter to stop.");
+    println!();
     for name in CALIBRATION_ORDER {
         print!("  press [{name}] (Enter=skip, q=quit): ");
         std::io::stdout().flush().ok();
