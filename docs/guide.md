@@ -119,8 +119,10 @@ cc-controller config set bindings.A enter
 | `pane_zoom` | toggle pane fullscreen |
 | `scroll_up` / `scroll_down` | scroll the focused program (mouse-wheel)¹ |
 | `enter` / `escape` | send Enter/Esc to the focused pane |
+| `arrow_up/down/left/right` | send an arrow key to the focused pane |
 | `voice` | hold-space for Claude's voice mode (see Voice) |
 | `dictation` | run `settings.dictation_command` (OS dictation) |
+| `pause` | toggle ignoring **all** input — a drift/escape hatch (default: `plus`) |
 | `noop` | ignore |
 
 ¹ Scrolling sends SGR mouse-wheel escape sequences, so it works over the socket
@@ -155,19 +157,21 @@ Each analog stick has a configurable **behavior** — change them in `config edi
 
 Defaults: **left = `keys`**, **right = `scroll`**. So to drive panes with the
 left stick: `cc-controller config set settings.sticks.left.behavior panes` (or
-flip it in `config edit`). Per-stick params live under
-`settings.sticks.{left,right}`:
+flip it in `config edit`). Config lives under `settings.sticks`:
 
 ```json
 "sticks": {
-  "left":  { "behavior": "panes", "deadzone": 0.5, "repeat_ms": 150 },
-  "right": { "behavior": "scroll", "deadzone": 0.18, "tick_ms": 30, "max_lines": 6, "invert": false }
+  "deadzone": 0.2,
+  "left":  { "behavior": "panes", "repeat_ms": 150 },
+  "right": { "behavior": "scroll", "tick_ms": 30, "max_lines": 6, "invert": false }
 }
 ```
 
-`keys`/`panes` use `deadzone` + `repeat_ms`; `scroll` uses `deadzone` +
-`tick_ms` + `max_lines` + `invert`. The left stick maps to the `left_x`/`left_y`
-profile axes, the right stick to `right_x`/`right_y`.
+`deadzone` is **shared by both sticks** (the drift clear zone) — set it in
+`config edit` or `config set settings.sticks.deadzone 0.25`; raise it if a stick
+drifts. `keys`/`panes` also use `repeat_ms`; `scroll` also uses `tick_ms` +
+`max_lines` + `invert`. The left stick maps to the `left_x`/`left_y` profile
+axes, the right stick to `right_x`/`right_y`.
 
 ## Editing config from the CLI
 
@@ -207,10 +211,17 @@ cc-controller local stop       # stop it
 ## Scrolling
 
 A stick set to `scroll` (right stick by default) sends mouse-wheel events: the
-further you push, the more wheel notches per `tick_ms` (acceleration) up to
-`max_lines`. It's **2D** — vertical *and* horizontal (the latter for programs
-that handle horizontal wheel). Flip vertical with `config set
-settings.sticks.right.invert true`.
+further you push, the more wheel notches per `tick_ms` up to `max_lines`. It's
+**2D** — vertical *and* horizontal (the latter for programs that handle
+horizontal wheel). Flip vertical with `config set settings.sticks.right.invert
+true`.
+
+The acceleration curve has a **clear zone + soft start**: nothing happens inside
+`deadzone`, and just past it the speed rounds to zero before ramping up — so
+**stick drift** resting near the deadzone never scrolls. Speed then ramps slowly
+over the lower ~75% of travel and quickly over the top ~25%. If a drifty stick
+still creeps, raise `settings.sticks.right.deadzone` (default `0.2`). As a last
+resort, the `pause` button (default **plus**) freezes all input.
 
 **Why mouse-wheel and not PageUp?** A mouse wheel is just an escape sequence on
 the program's input, which both backends can deliver over the socket. The

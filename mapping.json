@@ -1,5 +1,5 @@
 {
-  "_comment": "Edit `bindings` only — friendly control name -> action. Actions: tab_next, tab_prev, workspace_next, workspace_prev, pane_left, pane_right, pane_up, pane_down, pane_zoom, scroll_up, scroll_down, enter, escape, voice, dictation, noop. Scrolling is analog (right stick) configured under settings.scroll. The `profile` maps each friendly name to the raw SDL index; run `cc-controller calibrate` to rebuild it. Edit interactively with `cc-controller config bind` / `config edit`, or `config set <path> <value>`.",
+  "_comment": "Edit `bindings` only — friendly control name -> action. Actions: tab_next, tab_prev, workspace_next, workspace_prev, pane_left, pane_right, pane_up, pane_down, pane_zoom, scroll_up, scroll_down, enter, escape, arrow_up, arrow_down, arrow_left, arrow_right, voice, dictation, pause, noop. `pause` toggles ignoring all input (a drift/escape hatch). Analog stick behavior is under settings.sticks. The `profile` maps each friendly name to the raw SDL index; run `cc-controller calibrate` to rebuild it. Edit interactively with `cc-controller config bind` / `config edit`, or `config set <path> <value>`.",
   "_backend_comment": "Which multiplexer the same bindings drive: \"herdr\" (default) or \"tmux\". Actions are abstract — tmux reads tab=window, workspace=session, pane=pane. So tab_next/prev (ZL/ZR) become next/previous-window, workspace_next/prev (L/R) switch sessions, pane_* select-pane. Override per-run with `--backend <name>`; for remote mode the backend is chosen here (the controller sends backend-neutral intents and forwards the resolved backend to `cc-controller host`).",
   "backend": "tmux",
   "bindings": {
@@ -14,7 +14,8 @@
     "dpad_up": "pane_up",
     "dpad_down": "pane_down",
     "dpad_left": "pane_left",
-    "dpad_right": "pane_right"
+    "dpad_right": "pane_right",
+    "plus": "pause"
   },
   "remote": {
     "_comment": "Used by `cc-controller remote`: where the multiplexer machine is. ssh_host is any valid ssh target (user@host or a ~/.ssh/config alias). host_bin is the cc-controller binary on that machine (PATH name or absolute path); `remote` runs `<host_bin> host` over ssh and streams intents to it. Leave ssh_host empty to require --host. Ignored by `local`.",
@@ -54,15 +55,14 @@
   "settings": {
     "trigger_threshold": 0.5,
     "sticks": {
-      "_comment": "Each analog stick has a `behavior`: keys (4-way arrow keys), panes (4-way pane focus), scroll (2D wheel: y vertical, x horizontal), or off. keys/panes use deadzone + repeat_ms (keys repeats while held; panes fires per push); scroll uses deadzone + tick_ms + max_lines + invert. Left stick = left_x/left_y, right = right_x/right_y. Edit with `cc-controller config edit`.",
+      "_comment": "Each analog stick has a `behavior`: keys (4-way arrow keys), panes (4-way pane focus), scroll (2D wheel: y vertical, x horizontal), or off. `deadzone` is shared by both sticks (the drift clear zone). keys/panes also use repeat_ms (keys repeats while held; panes fires per push); scroll also uses tick_ms + max_lines + invert. Left stick = left_x/left_y, right = right_x/right_y. Edit with `cc-controller config edit`.",
+      "deadzone": 0.2,
       "left": {
         "behavior": "panes",
-        "deadzone": 0.5,
         "repeat_ms": 150
       },
       "right": {
         "behavior": "scroll",
-        "deadzone": 0.18,
         "tick_ms": 30,
         "max_lines": 6,
         "invert": false

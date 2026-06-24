@@ -88,7 +88,7 @@ fn dispatch_action(
             transport.send(&intents::scroll_intent(d));
         }
         "dictation" => run_dictation(dictation_cmd),
-        "noop" | "voice" => {}
+        "noop" | "voice" | "pause" => {}
         other => eprintln!("  ! unknown action: {other}"),
     }
 }
@@ -130,32 +130,27 @@ struct Stick {
 }
 
 /// Build a stick from `settings.sticks.<side>`, falling back to the legacy
-/// `arrows`/`scroll` block for params when the stick block is absent.
+/// `arrows`/`scroll` block for params when the stick block is absent. The
+/// `deadzone` is shared across both sticks (passed in, not per-stick).
 fn build_stick(
     s: &Value,
-    x_name: &str,
-    y_name: &str,
+    side: &str, // "left" | "right" -> the {side}_x / {side}_y profile axes
     axis_index: &HashMap<String, u32>,
     default_behavior: StickBehavior,
     legacy: &Value,
+    deadzone: f32,
     stale: Instant,
 ) -> Stick {
     let behavior = s["behavior"]
         .as_str()
         .map(StickBehavior::parse)
         .unwrap_or(default_behavior);
-    let num = |k: &str, d: f64| s[k].as_f64().or_else(|| legacy[k].as_f64()).unwrap_or(d);
     let ms = |k: &str, d: u64| s[k].as_u64().or_else(|| legacy[k].as_u64()).unwrap_or(d);
-    let default_dead = if default_behavior == StickBehavior::Scroll {
-        0.18
-    } else {
-        0.5
-    };
     Stick {
-        ax: axis_index.get(x_name).copied(),
-        ay: axis_index.get(y_name).copied(),
+        ax: axis_index.get(&format!("{side}_x")).copied(),
+        ay: axis_index.get(&format!("{side}_y")).copied(),
         behavior,
-        deadzone: num("deadzone", default_dead) as f32,
+        deadzone,
         repeat: Duration::from_millis(ms("repeat_ms", 150)),
         invert: s["invert"]
             .as_bool()
@@ -295,22 +290,24 @@ pub fn run_loop(
     // when `settings.sticks` is absent.
     let stale = Instant::now() - Duration::from_secs(1);
     let sticks = &settings["sticks"];
+    // One deadzone, shared by both sticks (drift clear zone).
+    let deadzone = sticks["deadzone"].as_f64().unwrap_or(0.2) as f32;
     let mut left_stick = build_stick(
         &sticks["left"],
-        "left_x",
-        "left_y",
+        "left",
         &axis_index,
         StickBehavior::Keys,
         &settings["arrows"],
+        deadzone,
         stale,
     );
     let mut right_stick = build_stick(
         &sticks["right"],
-        "right_x",
-        "right_y",
+        "right",
         &axis_index,
         StickBehavior::Scroll,
         &settings["scroll"],
+        deadzone,
         stale,
     );
     // Button `scroll_up`/`scroll_down` actions follow the scrolling stick's invert.
@@ -324,6 +321,11 @@ pub fn run_loop(
     let voice_idx = bindings
         .as_object()
         .and_then(|b| b.iter().find(|(_, a)| a.as_str() == Some("voice")))
+        .and_then(|(n, _)| btn_index.get(n).copied());
+    // Button bound to `pause` — toggles ignoring all input (drift escape hatch).
+    let pause_idx = bindings
+        .as_object()
+        .and_then(|b| b.iter().find(|(_, a)| a.as_str() == Some("pause")))
         .and_then(|(n, _)| btn_index.get(n).copied());
 
     let dictation_cmd = settings["dictation_command"].as_str().map(str::to_string);
@@ -348,6 +350,7 @@ pub fn run_loop(
     let mut v_latched = false;
     let mut v_down = Instant::now();
     let mut v_last = stale;
+    let mut paused = false;
     let mut seen: u64 = 0;
     let mut last_beat = Instant::now();
 
@@ -371,6 +374,25 @@ pub fn run_loop(
                 Event::JoyButtonDown { button_idx, .. } => {
                     seen += 1;
                     let bi = button_idx as u32;
+                    if Some(bi) == pause_idx {
+                        paused = !paused;
+                        if paused {
+                            v_pressing = false; // drop any in-flight voice
+                            v_latched = false;
+                        }
+                        crate::ui::banner(
+                            if paused { "PAUSED" } else { "RESUMED" },
+                            if paused {
+                                "inputs ignored — press pause again to resume"
+                            } else {
+                                "inputs live"
+                            },
+                        );
+                        continue;
+                    }
+                    if paused {
+                        continue;
+                    }
                     if Some(bi) == voice_idx {
                         v_pressing = true;
                         v_down = now;
@@ -406,6 +428,9 @@ pub fn run_loop(
                 }
                 Event::JoyHatMotion { state, .. } if state != HatState::Centered => {
                     seen += 1;
+                    if paused {
+                        continue;
+                    }
                     if let Some(d) = controller::hat_dir(state) {
                         let name = format!("dpad_{d}");
                         if let Some(action) = bindings.get(name.as_str()).and_then(|a| a.as_str()) {
@@ -422,6 +447,12 @@ pub fn run_loop(
                 }
                 _ => {}
             }
+        }
+
+        // While paused, ignore triggers / sticks / voice entirely.
+        if paused {
+            std::thread::sleep(Duration::from_millis(8));
+            continue;
         }
 
         // Triggers (ZL/ZR): rising edge past threshold.

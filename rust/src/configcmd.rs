@@ -28,8 +28,13 @@ const ACTIONS: &[(&str, &str)] = &[
     ("scroll_down", "scroll down"),
     ("enter", "send Enter"),
     ("escape", "send Escape"),
+    ("arrow_up", "send Up arrow"),
+    ("arrow_down", "send Down arrow"),
+    ("arrow_left", "send Left arrow"),
+    ("arrow_right", "send Right arrow"),
     ("voice", "hold-space voice mode"),
     ("dictation", "run the OS dictation command"),
+    ("pause", "pause/resume all input"),
     ("noop", "do nothing (unbind)"),
 ];
 
@@ -98,6 +103,13 @@ fn show(cfg_path: &Path) -> Result<(), String> {
                 value_str(v)
             ));
         }
+    }
+    if let Some(v) = config::get_path(&cfg, "settings.sticks.deadzone") {
+        lines.push(format!(
+            "  {}  {}",
+            style(format!("{:<18}", "stick deadzone")).dim(),
+            value_str(v)
+        ));
     }
     for (label, path) in [
         ("left stick", "settings.sticks.left"),
@@ -290,6 +302,16 @@ fn build_rows(cfg: &Value) -> (Vec<Row>, usize) {
         "settings.sticks.right.behavior",
         STICK,
         right,
+    ));
+    // Shared stick deadzone (drift clear zone) — discrete steps.
+    let dz = config::get_path(cfg, "settings.sticks.deadzone")
+        .map(value_str)
+        .unwrap_or_else(|| "0.2".to_string());
+    rows.push(choice_row(
+        "stick deadzone",
+        "settings.sticks.deadzone",
+        &["0.1", "0.15", "0.2", "0.25", "0.3", "0.35", "0.4"],
+        &dz,
     ));
     let backend = cfg["backend"].as_str().unwrap_or("herdr");
     rows.push(choice_row(
