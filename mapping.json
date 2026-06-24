@@ -32,8 +32,8 @@
       "minus": 4,
       "home": 5,
       "plus": 6,
-      "lstick": 7,
-      "rstick": 8,
+      "lstick_click": 7,
+      "rstick_click": 8,
       "L": 9,
       "R": 10,
       "dpad_up": 11,
@@ -56,7 +56,7 @@
     "sticks": {
       "_comment": "Each analog stick has a `behavior`: keys (4-way arrow keys), panes (4-way pane focus), scroll (2D wheel: y vertical, x horizontal), or off. keys/panes use deadzone + repeat_ms (keys repeats while held; panes fires per push); scroll uses deadzone + tick_ms + max_lines + invert. Left stick = left_x/left_y, right = right_x/right_y. Edit with `cc-controller config edit`.",
       "left": {
-        "behavior": "keys",
+        "behavior": "panes",
         "deadzone": 0.5,
         "repeat_ms": 150
       },
